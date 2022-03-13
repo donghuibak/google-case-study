@@ -1,0 +1,510 @@
+---
+title: "Case Study"
+author: "BAK Donghui"
+date: "Mar 13, 2022"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Abstract
+
+This is the last module of Google Data Analytics Certificate. There are 6 steps in case study analytics which are ask, prepare, process, analyze, share, and act.  
+Every data and business concept here is fiction and data is authorized by Google. Questions with bullet point are from google.
+
+### Scenario
+Customers who purchase single-ride or full-day passes are referred to as casual riders. Customers
+who purchase annual memberships are Cyclistic members.  
+Cyclistic’s finance analysts have concluded that annual members are much more profitable than casual riders. Although the
+pricing flexibility helps Cyclistic attract more customers, Moreno believes that maximizing the number of annual members will
+be key to future growth. Rather than creating a marketing campaign that targets all-new customers, Moreno believes there is a
+very good chance to convert casual riders into members.  
+Moreno has set a clear goal: Design marketing strategies aimed at converting casual riders into annual members. In order to
+do that, however, the marketing analyst team needs to better understand how annual members and casual riders differ, why
+casual riders would buy a membership, and how digital media could affect their marketing tactics. Moreno and her team are
+interested in analyzing the Cyclistic historical bike trip data to identify trends.
+
+### Ask
+* **What is the problem you are trying to solve?**  
+I am assigned to answer the question, how do annual members and casual riders use Cyclistic bikes differently?
+I will figure out key features which distinguish annual members and casual riders. 
+
+* **How can your insights drive business decisions?**  
+Data analyst is not a decision maker. Data analyst does analysis for helping stakeholders recognize currently statement of business clearly. There will be a great plus point if data analyst could suggest right recommendations.
+
+### Prepare
+* **Where is your data located?**  
+I have stored them in local drive.
+
+* **How is the data organized?**  
+The data are csv format.
+
+* **Are there issues with bias or credibility in this data? Does your data ROCCC(reliable, original, comprehensive, current and cited)?**  
+In the real world, ROCCC of the data is an issue.Since I am doing case study, I will reckon data are fine.
+
+* **How are you addressing licensing, privacy, security, and accessibility?**  
+It is important to know property of data. Nonetheless engineers take control of data in the real world, data analyst should know legal issues of data, such as licensing, privacy, security, and so on.  
+Usually data stored in DB. This is why SQL is called basic skillset of data analyst.
+
+### Process
+
+* **What steps have you taken to ensure that your data is clean?**  
+OK. Let's get down to business. Data preprosessing!!  
+1. Load libarary
+```{r libaray load}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(finalfit)
+library(tidyverse)
+library(norm)
+```
+  
+2. Load data
+```{r data load}
+# df <- read.csv("C:/Users/dhton/Desktop/google_case/data/202101-divvy-tripdata.csv", header=T)
+# for (i in 2:12){
+#   df_title <- sprintf("C:/Users/dhton/Desktop/google_case/data/2021%02d-divvy-tripdata.csv", i)
+#   add_df <- read.csv(df_title, header=T)
+#   df <- rbind(df, add_df)
+# }
+
+# It took time much more than I expected. The exact time is below.
+
+# system.time(for (i in 2:12){
+#   df_title <- sprintf("C:/Users/dhton/Desktop/google_case/data/2021%02d-divvy-tripdata.csv", i)
+#   add_df <- read.csv(df_title, header=T)
+#   df <- rbind(df, add_df)
+# })
+#  사용자  시스템 elapsed 
+#  104.88    2.50  107.69 
+
+
+# Maybe there is a better way.
+N <- 12
+file_list <- vector("list", N)
+for (i in 1:N){
+  file_name <- sprintf("C:/Users/dhton/Desktop/google_case/data/2021%02d-divvy-tripdata.csv", i)
+  file_list[[i]] <- file_name
+}
+l <- lapply(file_list, fread, sep = ",")
+# 사용자  시스템 elapsed 
+#   4.97    0.40    3.68 
+dt <- rbindlist(l)
+# 사용자  시스템 elapsed 
+#   0.31    0.06    0.38 
+
+# Much better!!
+```
+  
+```{r glimpse data}
+glimpse(dt)
+```
+There are 13 variables in data. Since I do not have meta data, I should investigate variables and guess they mean.(Obviously, do not try this at the real world. Ask data engineer)  
+  
+  ride_id
+```{r}
+glimpse(unique(dt$ride_id))
+```
+`ride_id` seems be generated randomly and unique by single ride, which makes hard to recognize return user.  
+  
+I can guess others by their names but `start_lat`, `start_lng`, `end_lat`, `and end_lng`.
+```{r}
+dt[, 9:12] %>% summary()
+```
+I do not have any idea what they are.They will not be used.  
+
+```{r}
+dt[, 9:12 := NULL]
+```
+  
+  
+  I can see that there are blanks in  `end_station_name` and `end_station_id`. Maybe NULL and blanks are mixed in this data.
+  
+  3. Check NULL(or blank)
+```{r}
+# dt1[, lapply(dt1[,c(1:2, 5:8)], function(x) sum(x == ""))]
+# Above code type is little bit slower than below type
+dt[, lapply(.SD, function(x) sum(x=="")), .SDcols = c(1:2, 5:8)]
+# POSIXct class can't compare with charactere
+dt[, sapply(.SD, function(x) sum(as.character(x)=="")), .SDcols = 3:4]
+# It takes a bit long time..
+dt[, lapply(.SD, function(x) sum(is.na(x)))]
+# is.na doesn't have to assign SDcols.
+```
+NULL in `start_station_name`, `start_station_id`, `end_station_id`, and `end_station_name` are more than 10%, which is little too much. It's time to handle missing value.
+  
+  4. Missing value  
+  It would be easier to use many NULL handling packages in R if I change blanks to NULL.
+```{r}
+# dt2 <- mutate_all(dt1[,-(3:4)], list(~na_if(.,"")))
+# below is faster
+dt1 <- dt[, lapply(.SD, function(x) na_if(x, "")), .SDcols = -(3:4)]
+# POSIXlt class is irritate to convert.
+```
+  
+  I want to check variables in detail.
+```{r}
+dt1 %>% select(3:6) %>% ff_glimpse()
+```
+  
+  Visualization will be helpful for better understanding.
+```{r}
+dt1 %>% select(3:6) %>% missing_plot()
+```
+  
+  NULL values are quite well distributed.
+  
+```{r}
+dt1 %>% missing_pattern()
+```
+  
+  Before the imputation, I should know what type of missing value they are. If they are MACR or MAR, it would be pretty easy to impute.  
+  As far as I know, Little's test is commonly used for MCAR test of categorical value. Thanks to Eric Stemmler, below codes are quoted.
+```{r Little test}
+mcar <- function(x){ 
+  if(!require(norm)) {
+    stop("You must have norm installed to use LittleMCAR") 
+  } 
+  
+  # if(!require(data.table)) {
+  # 	stop("Please install the R-package data.table to use mcar")
+  # }
+  
+  if(!(is.matrix(x) | is.data.frame(x))) {
+    stop("Data should be a matrix or dataframe")
+  }
+  
+  if (is.data.frame(x)){
+    x <- data.matrix(x)
+  }
+  
+  # delete rows of complete missingness
+  foo <- function(x) return(any(!is.na(x)))
+  dd <- apply(X = x, MARGIN = 1L, FUN = foo)
+  dd <- which(!dd, arr.ind = TRUE)
+  if(length(dd) > 0) 
+    x <- x[-dd,]
+  
+  # define variables        
+  n.var <- ncol(x) # number of variables
+  n <- nrow(x)  #number of respondents
+  var.names <- colnames(x)
+  r <- 1 * is.na(x)
+  
+  nmis <- as.integer(apply(r, 2, sum))  #number of missing data for each variable REWRITE
+  mdp <- (r %*% (2^((1:n.var - 1)))) + 1  #missing data patterns
+  x.mp <- data.frame(cbind(x,mdp)) # add column indicating pattern
+  colnames(x.mp) <- c(var.names,"MisPat") # set name of new column to MisPat
+  n.mis.pat <- length(unique(x.mp$MisPat)) # number of missing data patterns
+  p <- n.mis.pat-1 # number of Missing Data patterns minus 1 (complete data row)
+  
+  
+  s <- prelim.norm(x)
+  ll <- em.norm(s)
+  fit <- getparam.norm(s = s, theta = ll)
+  
+  # gmean<-mlest(x)$muhat #ML estimate of grand mean (assumes Normal dist)
+  gmean <- fit$mu
+  # gcov<-mlest(x)$sigmahat #ML estimate of grand covariance (assumes Normal dist)
+  gcov <- fit$sigma
+  colnames(gcov) <- rownames(gcov) <- colnames(x)
+  
+  #recode MisPat variable to go from 1 through n.mis.pat
+  x.mp$MisPat2 <- rep(NA,n)
+  for (i in 1:n.mis.pat){ 
+    x.mp$MisPat2[x.mp$MisPat == sort(unique(x.mp$MisPat), partial=(i))[i]]<- i 
+  }
+  
+  x.mp$MisPat<-x.mp$MisPat2
+  x.mp<-x.mp[ , -which(names(x.mp) %in% "MisPat2")]
+  
+  #make list of datasets for each pattern of missing data
+  datasets <- list() 
+  for (i in 1:n.mis.pat){
+    datasets[[paste("DataSet",i,sep="")]]<-x.mp[which(x.mp$MisPat==i),1:n.var]
+  }
+  
+  #degrees of freedom
+  kj<-0
+  for (i in 1:n.mis.pat){	
+    no.na<-as.matrix(1* !is.na(colSums(datasets[[i]]))) 
+    kj<-kj+colSums(no.na) 
+  }
+  
+  df<-kj -n.var
+  
+  #Little's chi-square
+  d2<-0
+  cat("this could take a while")
+  
+  # this crashes at the missingness pattern where every column is missing
+  # this for-loop can be handled faster with plyr-function
+  for (i in 1:n.mis.pat){	
+    mean <- (colMeans(datasets[[i]])-gmean) 
+    mean <- mean[!is.na(mean)] 
+    keep <- 1* !is.na(colSums(datasets[[i]])) 
+    keep <- keep[which(keep[1:n.var]!=0)] 
+    cov <- gcov 
+    cov <- cov[which(rownames(cov) %in% names(keep)) , which(colnames(cov) %in% names(keep))] 
+    d2 <- as.numeric(d2+(sum(x.mp$MisPat==i)*(t(mean)%*%solve(cov)%*%mean)))
+  }
+  
+  #p-value for chi-square
+  p.value<-1-pchisq(d2,df)
+  
+  #descriptives of missing data
+  amount.missing <- matrix(nmis, 1, length(nmis))
+  percent.missing <- amount.missing/n
+  amount.missing <- rbind(amount.missing,percent.missing)
+  colnames(amount.missing) <- var.names
+  rownames(amount.missing) <- c("Number Missing", "Percent Missing")
+  
+  list(chi.square = d2, 
+       df = df, 
+       p.value = p.value, 
+       missing.patterns = n.mis.pat, 
+       amount.missing = amount.missing, 
+       data = datasets)
+}
+```
+  
+  Before I use Little's test, I should reduce level of `start_station_name` and `end_station_name`. It is not only for Little's test, but also to avoid curse of dimension.  
+```{r}
+dt1[, c(4,6) := NULL]
+dt1$start_station_big_name <- as.character(lapply(strsplit(as.character(dt1$start_station_name), split = '&'), "[",1))
+dt1$end_station_big_name <- as.character(lapply(strsplit(as.character(dt1$end_station_name), split = '&'), "[",1))
+dt1[, 3:4 := NULL]
+```
+  
+  Let's check how many levels I have.
+```{r}
+dt1%>% select(4:5) %>% ff_glimpse()
+```
+Much better! But still they are too many. However, there is no way to categorise into larger group unless I apply advanced statistics.  It is time to admit my limitation and do Little's test.  
+  
+```{r}
+r <- mcar(dt1[,c(2:5)])
+r[["p.value"]]
+r[["missing.patterns"]]
+r[["amount.missing"]]
+```
+Oops..Maybe `start_station_big_name` and `end_station_big_name` is too related? Let's try not to put them together.  
+  
+```{r}
+r1 <- mcar(dt1[,c(2:4)])
+r1[["p.value"]]
+r1[["missing.patterns"]]
+r1[["amount.missing"]]
+```
+Hmm..p value is still 0. Maybe it is because levels of variables are too many or `rideable_type` or `member_casual` is criminal. 
+  
+```{r}
+dt1 %>% filter(is.na(start_station_big_name))  %>% distinct(rideable_type,member_casual)
+dt1[is.na(dt1$end_station_big_name),] %>% distinct(rideable_type,member_casual)
+```
+Aha! Only `electric_bike` is missing on `start_station_big_name` and only `docked_bike` by `member` is not missing on `end_station_big_name`.
+  
+  5. Imputation  
+  Since the missing data are not MCAR, I cannot delete them. I can see that there are some missing patterns so I will impute them by mode imputation. I know there is limitation on mode imputation, but I do not want to use advanced imputation method since I do not fully understand their formulars.  
+  I will impute from `start_station_big_name`. I found some handy function for calculating mode.
+```{r mode code}
+calc_mode <- function(x){
+  
+  # List the distinct / unique values
+  distinct_values <- unique(x)
+  
+  # Count the occurrence of each distinct value
+  distinct_tabulate <- tabulate(match(x, distinct_values))
+  
+  # Return the value with the highest occurrence
+  distinct_values[which.max(distinct_tabulate)]
+}
+```
+  
+   I will use mode imputation by each segment. First, `start_station_big_name`.
+```{r mode imputation}
+df_afimp <- dt1 %>% group_by(rideable_type, member_casual) %>%
+  mutate(start_station_big_name = if_else(is.na(start_station_big_name), 
+                                          calc_mode(dt1[!is.na(start_station_big_name)]$start_station_big_name),
+                                          start_station_big_name)) 
+
+dt_afimp <- data.table(df_afimp)
+dt_afimp[, .N, .(start_station_big_name)][order(-N)]
+```
+Well, I can see all `NA` change into `Clark St`. I think it is too exaggerate, but let's move on.  
+  
+  Imputation of `end_station_big_name`. 
+```{r}
+df_afimp1 <- dt_afimp %>% group_by(rideable_type, member_casual) %>%
+  mutate(end_station_big_name = if_else(is.na(end_station_big_name),
+                                        calc_mode(dt1[!is.na(end_station_big_name)]$end_station_big_name),
+                                        end_station_big_name))
+
+dt_afimp1 <- data.table(df_afimp1)
+dt_afimp1[, .N, .(end_station_big_name)][order(-N)]
+```
+  
+  6. Create variables  
+  Riding time and riding day can be calculated. I will create variables after paste time information that I cut.
+```{r create variables}
+dt2 <- cbind(dt_afimp1,dt[,3:4])
+dt3 <- dt2 %>% mutate(ride_length = round(as.numeric(ended_at - started_at, units='mins')), weekday = weekdays(started_at))
+```
+  
+  Is new variable OK? 
+```{r}
+dt3[,.N,weekday]
+ggplot(data=dt3, aes(x=member_casual, y=ride_length)) + 
+  geom_boxplot()
+```
+  
+  `ride_length` seems strange. I will check quantile.
+```{r check ride_length}
+dt3 %>% group_by(member_casual) %>% 
+  summarize('0%' = quantile(ride_length, probs=0),
+            '25%' = quantile(ride_length, probs=0.25),
+            '50%' = quantile(ride_length, probs=0.5),
+            '75%' = quantile(ride_length, probs=0.75),
+            '100%' = quantile(ride_length, probs=1))
+```
+Hmm..After 75%, the number arose dramatically. It is strange that people ride bikes over 50000 mins and minus mins. Probably there were some computational or human error. The problem is, how do I distinguish which one is an error and which one is not.  
+  
+  The negative values are probably errors. But what about exaggerated values? Are they errors or outliers? I do not know at this moment. Thus, I will just change negative values to median(not mean since there are many exaggerated values)
+```{r}
+dt3[, ride_length := ifelse(ride_length<0, median(ride_length), ride_length)]
+ggplot(data=dt3, aes(x=member_casual, y=ride_length)) + 
+  geom_boxplot()
+```
+  
+  It would be better if there is larger category regarding `ride_length`
+```{r}
+dt3[, big_ride_length := ifelse(ride_length < 30, 'Less 30mins',
+                                ifelse(ride_length <= 60, 'Half~1hour',
+                                ifelse(ride_length <= 90, '1~1.5hours',
+                                ifelse(ride_length <= 120, '1.5~2hours',
+                                'More 2hours'))))]
+```
+  
+This is the summary. 
+```{r summary}
+glimpse(dt3)
+```
+  
+### Analyze
+
+* **What surprises did you discover in the data**  
+  I guess member users ride bike more often and longer. However, since the ride_id are not generated per user, it is very difficult to count frequency of each user. Hence, I will focus on riding time.
+
+```{r member mean}
+dt3 %>% group_by(member_casual) %>% summarise(mean(ride_length))
+```
+
+Surprisingly, casual riders use far much longer. It is because there are huge outliers(or errors), Let's visualize with larger category.
+```{r}
+dt3$big_ride_length <- ordered(dt3$big_ride_length, 
+                       levels=c('Less 30mins','Half~1hour','1~1.5hours','1.5~2hours','More 2hours'))
+ggplot(dt3, aes(x=big_ride_length)) + geom_bar(stat='count') + facet_wrap(~member_casual)
+```
+It shows that **The members riding time is biased on 'less than 30mins' rather than casual's**
+  
+  Let's check about weekday.
+```{r weekday counts}
+table(dt3$weekday) %>% sort(decreasing = TRUE)
+```
+
+I want to see whether member and casual show different weekday usage trend.
+
+```{r}
+# There are 3 ways of how to aggregate data by types. 
+# 1.Base R: table -> data.frame -> colnmaes()
+#  > data.frame(table(dt1$weekday))
+# 2.dplyr: using %>%
+#  > dt1 %>% group_by(weekday) %>% summarise(cnt=n())
+# 3.data.table: simple and fast
+#  > dt1[, .N, weekday]
+dt3[, .N, .(member_casual, weekday)][order(-member_casual, -N)]
+```
+
+The result shows that member usually ride on weekdays and casual usually ride on weekends.  
+Visualization will help to understand easier.
+
+```{r weekday visualization}
+# There are 2 ways of arrange weekday. 
+# 1.Create new row which translate weekday to int. 
+#  > dt1[, ':='(weekday_num, fcase(weekday == '월요일', 1,
+                       # weekday == '화요일', 2,
+                       # weekday == '수요일', 3,
+                       # weekday == '목요일', 4,
+                       # weekday == '금요일', 5,
+                       # weekday == '토요일', 6,
+                       # weekday == '일요일', 7))]
+
+# 2. Input order to weekday value
+#  > dt1$weekday <- ordered(dt3$weekday, 
+#                       levels=c('월요일','화요일','수요일','목요일','금요일','토요일','일요일' ))
+# Second is better.
+
+dt3$weekday <- ordered(dt3$weekday, 
+                      levels=c('월요일','화요일','수요일','목요일','금요일','토요일','일요일' ))
+weekday_plot <- dt3[, .N, .(member_casual, weekday)][order(-member_casual, weekday)]
+ggplot(weekday_plot, aes(x=weekday, y=N)) + geom_bar(stat='identity') + facet_wrap(~member_casual)
+
+```
+  
+  It is clear that **The members ride throughout the week, which I guess for commuting. However, the casuals ride weekday much more, which I guess for entertaining**
+  
+  Let's check about bike type.
+```{r rideable visualization}
+rideable_plot <- dt3[, .N, .(member_casual, rideable_type)][order(-member_casual, rideable_type)]
+ggplot(rideable_plot, aes(x=rideable_type, y=N)) + geom_bar(stat='identity') + facet_wrap(~member_casual)
+```
+  
+  It shows that **member do not use docked bike**.  
+  
+  What about stations? Is there any difference about station usage between the members and casuals? Should I see the difference of number or trend?
+```{r}
+dt3[,.N,.(member_casual)]
+```
+The members are about 20% more than the casuals. I think it is OK to compare them by numbers.  
+
+```{r start station visualization}
+ggplot(dt3[,.N,.(start_station_big_name, member_casual)], aes(x=reorder(start_station_big_name,N), y=N, fill=member_casual)) + 
+  geom_bar(stat='identity', position = position_dodge()) +
+  coord_flip(xlim = c(length(unique(dt3$start_station_big_name))-9,
+                      length(unique(dt3$start_station_big_name))))
+```
+  
+  In start station, the casuals ride more than members in`Michigan Ave`.  
+  
+```{r end station visualization}
+ggplot(dt3[,.N,.(end_station_big_name, member_casual)], aes(x=reorder(end_station_big_name,N), y=N, fill=member_casual)) + 
+  geom_bar(stat='identity', position = position_dodge()) +
+  coord_flip(xlim = c(length(unique(dt3$end_station_big_name))-9,
+                      length(unique(dt3$end_station_big_name))))
+```
+  
+  There is no big difference of usage between `start_station_big_name` and `end_station_big_name`.   
+  
+  Why there is no big difference between start and end station? Are they ride within same location?
+```{r}
+dt3[, same_station := (start_station_big_name == end_station_big_name)]
+number <- dt3[, .N, .(same_station, member_casual)][order(-member_casual, -same_station)]
+number[, per := prop.table(N), member_casual]
+number
+```
+About 20% of rides are occurred in same location. Interestingly, **the members rides more inter-location than the casuals**. It solids my opinion which **the members would ride for commuting**.
+  
+### Share  
+* **Where you able to answer the question of how annual members and casual riders use Cyclist bikes differently?**  
+  The main purpose of members using the Cyclist is for commuting whilst the casuals' is for entertaining.  
+    
+### Act  
+* **What is your final conclusion based on your analysis?**  
+  At the beginning, I said that I will find key feature which distinguish annual members and casual riders. My answer is, if someone rides i) weekdays more than weekend, ii) rides shorter time(about 30mins), iii)travel into same location, he/she has more chance to become a member.  
+  
+* **What next steps would you or your stakeholders take based on your finding?**  
+I recommend to do individual marketing who has potential to become a member.
